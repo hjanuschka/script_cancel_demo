@@ -96,21 +96,29 @@ async function refreshExecutions() {
             Duration: ${exec.duration}ms | Elapsed: ${elapsed}ms
           </div>
           ${exec.status === 'running' ? `
-            <button class="danger" style="margin-top: 8px; width: 100%;"
-                    onclick="cancelExecution('${exec.executionId}')">
+            <button class="danger cancel-btn" style="margin-top: 8px; width: 100%;"
+                    data-execution-id="${exec.executionId}">
               Cancel Execution
             </button>
           ` : ''}
         </div>
       `;
     }).join('');
+
+    // Add event listeners to cancel buttons
+    document.querySelectorAll('.cancel-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        const executionId = button.getAttribute('data-execution-id');
+        cancelExecution(executionId);
+      });
+    });
   } catch (error) {
     console.error('Failed to refresh executions:', error);
   }
 }
 
 // Cancel execution
-window.cancelExecution = async function(executionId) {
+async function cancelExecution(executionId) {
   try {
     showStatus('Terminating script...', 'info');
 
