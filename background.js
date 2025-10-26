@@ -35,28 +35,13 @@ async function handleExecuteScript(duration) {
       return { success: false, error: 'No active tab found' };
     }
 
-    // Generate a unique execution ID
-    const executionId = crypto.randomUUID();
-
-    // Store execution info
-    activeExecutions.set(executionId, {
-      executionId,
-      tabId: tab.id,
-      startTime: Date.now(),
-      duration,
-      status: 'running'
-    });
-
-    console.log(`Starting script execution ${executionId} for ${duration}ms`);
-
-    // Execute a long-running script with the execution ID
+    // Execute a long-running script
     const scriptCode = `
       (async function() {
         const startTime = Date.now();
         const duration = ${duration};
-        const executionId = "${executionId}";
 
-        console.log(\`Script \${executionId} started, will run for \${duration}ms\`);
+        console.log('Script started, will run for ' + duration + 'ms');
 
         // Create a visual indicator
         const indicator = document.createElement('div');
@@ -73,7 +58,7 @@ async function handleExecuteScript(duration) {
           font-family: Arial, sans-serif;
           box-shadow: 0 2px 10px rgba(0,0,0,0.3);
         \`;
-        indicator.textContent = \`Script running... (\${duration}ms)\`;
+        indicator.textContent = 'Script running... (' + duration + 'ms)';
         document.body.appendChild(indicator);
 
         // Simulate long-running work
@@ -85,7 +70,7 @@ async function handleExecuteScript(duration) {
           if (counter % 100 === 0) {
             const elapsed = Date.now() - startTime;
             const remaining = duration - elapsed;
-            indicator.textContent = \`Script running... \${remaining}ms remaining\`;
+            indicator.textContent = 'Script running... ' + remaining + 'ms remaining';
           }
 
           // Yield to allow termination
@@ -104,47 +89,55 @@ async function handleExecuteScript(duration) {
 
         return {
           success: true,
-          iterations: counter,
-          executionId
+          iterations: counter
         };
       })();
     `;
 
-    // Execute the script using chrome.userScripts.execute()
+    // Execute the script - returns executionId immediately
     const results = await chrome.userScripts.execute({
       target: { tabId: tab.id },
-      func: scriptCode,
-      world: 'MAIN',
-      executionId: executionId
+      js: [{ code: scriptCode }],  // Use js array with code property
+      world: 'MAIN'
     });
 
-    // Update execution status
-    const execution = activeExecutions.get(executionId);
-    if (execution) {
-      execution.status = 'completed';
-      execution.endTime = Date.now();
-      execution.result = results;
+    // Get the execution ID from the result
+    const executionId = results[0]?.executionId;
+
+    if (!executionId) {
+      return {
+        success: false,
+        error: 'No execution ID returned by browser'
+      };
     }
 
-    console.log(`Script execution ${executionId} completed`, results);
+    console.log(`Script execution started with ID ${executionId}`);
+
+    // Store execution info
+    activeExecutions.set(executionId, {
+      executionId,
+      tabId: tab.id,
+      startTime: Date.now(),
+      duration,
+      status: 'running'
+    });
+
+    // Monitor script completion in background
+    setTimeout(() => {
+      const execution = activeExecutions.get(executionId);
+      if (execution && execution.status === 'running') {
+        execution.status = 'completed';
+        execution.endTime = Date.now();
+      }
+    }, duration + 1000);
 
     return {
       success: true,
-      executionId,
-      result: results
+      executionId
     };
 
   } catch (error) {
     console.error('Script execution failed:', error);
-
-    // Check if it was terminated
-    if (error.message?.includes('terminated')) {
-      return {
-        success: false,
-        error: 'Script was terminated',
-        terminated: true
-      };
-    }
 
     return {
       success: false,
