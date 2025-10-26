@@ -80,12 +80,21 @@ Or use the test script:
 
 ### Check if API is Available
 
-Open the extension's background page console:
+**Method 1: Use the Diagnostic Page**
+1. Open `check_api.html` in the extension directory
+2. Right-click the extension icon and select "Options" (if configured) OR
+3. Navigate to `chrome-extension://<extension-id>/check_api.html`
+4. The page will show all available APIs and methods
+
+**Method 2: Background Page Console**
 1. Go to `chrome://extensions`
 2. Find "User Script Cancellation Demo"
-3. Click "background page" under "Inspect views"
+3. Click "Service Worker" or "background page" under "Inspect views"
 4. In the console, type: `chrome.userScripts`
 5. You should see an object with `execute` and `terminate` methods
+
+**Method 3: Check in Popup**
+Open the extension popup and check the browser console for the error message about API availability.
 
 ### Common Issues
 
@@ -96,6 +105,18 @@ Open the extension's background page console:
 - Verify Developer Mode is enabled at `chrome://extensions`
 - Rebuild Chrome with: `autoninja -C out/Default chrome`
 - Check that `extensions/common/api/_api_features.json` includes `userScripts.terminate`
+
+**Issue**: "chrome.userScripts.terminate is undefined"
+
+**Solutions**:
+- **Clear the test profile** to remove cached API definitions:
+  ```bash
+  rm -rf /tmp/chrome-test-profile
+  ```
+- Rebuild Chrome to ensure the latest IDL changes are included
+- Restart Chrome completely (not just reload the extension)
+- Use the diagnostic page (`check_api.html`) to see which methods are available
+- Verify the feature flag is enabled by checking `chrome://version` for `--enable-features=ApiUserScriptsExecute`
 
 **Issue**: Script doesn't stop when cancelled
 
