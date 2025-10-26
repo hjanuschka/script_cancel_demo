@@ -17,6 +17,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleExecuteScript(duration) {
   try {
+    // Check if userScripts API is available
+    if (!chrome.userScripts || !chrome.userScripts.execute) {
+      return {
+        success: false,
+        error: 'chrome.userScripts.execute API is not available. Make sure you:\n' +
+               '1. Are running Chrome with --enable-features=ApiUserScriptsExecute\n' +
+               '2. Are in Developer Mode (chrome://extensions)\n' +
+               '3. Have rebuilt Chrome after the latest changes'
+      };
+    }
+
     // Get the active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
