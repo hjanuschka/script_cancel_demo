@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "User Script Cancellation Demo",
+  "version": "1.0.0",
+  "description": "Demonstrates chrome.userScripts.execute() and terminate() APIs for cancellable script execution",
+  "permissions": [
+    "userScripts",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Script Cancel Demo"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
