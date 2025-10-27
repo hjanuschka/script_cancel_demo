@@ -4,7 +4,7 @@ const activeExecutions = new Map();
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'executeScript') {
-    handleExecuteScript(message.duration).then(sendResponse);
+    handleExecuteScript(message.duration, message.timeout).then(sendResponse);
     return true; // Keep channel open for async response
   } else if (message.action === 'cancelScript') {
     handleCancelScript(message.executionId).then(sendResponse);
@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function handleExecuteScript(duration) {
+async function handleExecuteScript(duration, timeout) {
   try {
     // Check if userScripts API is available
     if (!chrome.userScripts || !chrome.userScripts.execute) {
@@ -43,9 +43,10 @@ async function handleExecuteScript(duration) {
       (async function() {
         const startTime = Date.now();
         const duration = ${duration};
+        const timeout = ${timeout || 'null'};  // Optional timeout
         const tempId = '${tempId}';
 
-        console.log('Script started with temp ID: ' + tempId);
+        console.log('Script started with temp ID: ' + tempId + ', duration: ' + duration + 'ms, timeout: ' + (timeout || 'none'));
 
         // Store cancellation flag globally
         window.__scriptCancellations = window.__scriptCancellations || {};
@@ -77,15 +78,29 @@ async function handleExecuteScript(duration) {
         // Simulate long-running work with UI updates
         let counter = 0;
 
-        // Run until duration expires OR cancelled
+        // Run until duration expires OR cancelled OR timeout
         while (Date.now() - startTime < duration) {
-          // Check if cancelled (cooperative cancellation)
+          const elapsed = Date.now() - startTime;
+
+          // FIRST: Check timeout (self-termination without IPC)
+          if (timeout !== null && elapsed >= timeout) {
+            indicator.style.background = '#FF9800';
+            indicator.style.fontSize = '18px';
+            indicator.textContent = '⏱️ Script TIMEOUT (self-terminated)!';
+            setTimeout(() => indicator.remove(), 5000);
+            delete window.__scriptCancellations[tempId];
+            console.log('Script self-terminated due to timeout after ' + elapsed + 'ms');
+            return { success: false, timeout: true };
+          }
+
+          // SECOND: Check if cancelled (cooperative cancellation via IPC)
           if (window.__scriptCancellations[tempId]) {
             indicator.style.background = '#f44336';
             indicator.style.fontSize = '18px';
             indicator.textContent = '⛔ Script TERMINATED!';
             setTimeout(() => indicator.remove(), 5000);
             delete window.__scriptCancellations[tempId];
+            console.log('Script terminated via IPC after ' + elapsed + 'ms');
             return { success: false, cancelled: true };
           }
 
@@ -97,9 +112,14 @@ async function handleExecuteScript(duration) {
 
           // Update UI
           const now = Date.now();
-          const elapsed = now - startTime;
-          const remaining = duration - elapsed;
-          indicator.textContent = '🟢 Running: ' + Math.round(remaining) + 'ms left';
+          const currentElapsed = now - startTime;
+          const remaining = duration - currentElapsed;
+          let statusText = '🟢 Running: ' + Math.round(remaining) + 'ms left';
+          if (timeout !== null) {
+            const timeoutRemaining = timeout - currentElapsed;
+            statusText += ' (timeout in ' + Math.round(timeoutRemaining) + 'ms)';
+          }
+          indicator.textContent = statusText;
 
           // CRITICAL: Use setTimeout (macrotask) instead of Promise.resolve (microtask)
           // Microtasks run BEFORE the browser processes IPC messages

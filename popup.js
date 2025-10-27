@@ -1,6 +1,7 @@
 // DOM elements
 const durationInput = document.getElementById('duration');
 const executeBtn = document.getElementById('executeBtn');
+const executeWithTimeoutBtn = document.getElementById('executeWithTimeoutBtn');
 const statusDiv = document.getElementById('status');
 const executionsDiv = document.getElementById('executions');
 
@@ -48,6 +49,46 @@ executeBtn.addEventListener('click', async () => {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     executeBtn.disabled = false;
+  }
+});
+
+// Execute script with timeout button handler
+executeWithTimeoutBtn.addEventListener('click', async () => {
+  executeWithTimeoutBtn.disabled = true;
+  showStatus('Starting 10s script with 5s timeout...', 'info');
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'executeScript',
+      duration: 10000,  // Script tries to run for 10 seconds
+      timeout: 5000     // But will self-terminate after 5 seconds
+    });
+
+    if (response.success) {
+      currentExecutionId = response.executionId;
+      showStatus(
+        `Script started with 5s timeout! ID: ${response.executionId.substring(0, 8)}...`,
+        'success'
+      );
+
+      // Refresh executions list
+      refreshExecutions();
+
+      // Start polling for updates
+      startPolling();
+    } else {
+      if (response.timeout) {
+        showStatus('Script timed out (expected!)', 'success');
+      } else if (response.terminated) {
+        showStatus('Script was terminated', 'error');
+      } else {
+        showStatus(`Error: ${response.error}`, 'error');
+      }
+    }
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+  } finally {
+    executeWithTimeoutBtn.disabled = false;
   }
 });
 
