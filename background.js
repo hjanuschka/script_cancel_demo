@@ -169,17 +169,25 @@ async function handleExecuteScript(duration, timeout) {
       tabId: tab.id,
       startTime: Date.now(),
       duration,
+      timeout,  // Store timeout for UI display
       status: 'running'
     });
 
     // Monitor script completion in background
+    // Use timeout if specified, otherwise use duration
+    const maxRuntime = timeout || duration;
     setTimeout(() => {
       const execution = activeExecutions.get(executionId);
       if (execution && execution.status === 'running') {
-        execution.status = 'completed';
+        // If timeout was specified and we're here, script timed out
+        if (timeout) {
+          execution.status = 'timeout';
+        } else {
+          execution.status = 'completed';
+        }
         execution.endTime = Date.now();
       }
-    }, duration + 1000);
+    }, maxRuntime + 1000);
 
     return {
       success: true,
