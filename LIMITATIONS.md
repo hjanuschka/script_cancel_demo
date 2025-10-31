@@ -150,7 +150,34 @@ async function cooperative() {
 ```
 **Why**: Script voluntarily checks flag and uses macrotask yielding.
 
-#### 2. Scripts Using AbortController Pattern
+#### 2. Scripts Using AbortSignal (chrome.userScripts.execute)
+```javascript
+// Chrome auto-injects 'signal' variable!
+async function withAbortSignal() {
+  while (running) {
+    // Check signal.aborted (auto-set when terminate() is called)
+    if (signal.aborted) {
+      cleanup();
+      return { cancelled: true };
+    }
+
+    await doWork();
+    await new Promise(r => setTimeout(r, 0));  // MUST use setTimeout!
+  }
+}
+
+// Extension calls terminate():
+chrome.userScripts.terminate(executionId);
+// → Chrome injects: window.__userScriptAborts[executionId].abort()
+// → Script detects signal.aborted on next iteration
+```
+**Why**: Chrome auto-injects AbortController, calls abort() when terminate() is called. Script still must:
+- Check `signal.aborted` frequently
+- Use `setTimeout()` for macrotask yielding (NOT `Promise.resolve()`)
+
+**IMPORTANT**: AbortSignal does NOT automatically stop your code! It only sets `signal.aborted = true`. Your script must check this flag. The cancellation is purely cooperative.
+
+#### 3. Scripts Using Manual AbortController
 ```javascript
 const controller = new AbortController();
 
@@ -377,14 +404,15 @@ async function properCleanup() {
 
 ## Summary Table
 
-| Code Pattern | V8 Terminate | Cooperative | Notes |
-|-------------|--------------|-------------|-------|
+| Code Pattern | V8 Terminate | Cooperative (AbortSignal) | Notes |
+|-------------|--------------|--------------------------|-------|
 | `while(true) {}` sync | ✅ Works | N/A | Blocks IPC too |
 | `while(true) { await Promise.resolve() }` | ❌ Fails | ❌ Fails | Microtasks block IPC |
-| `while(true) { await setTimeout }` | ❌ Fails | ✅ Works | Macrotasks allow IPC |
+| `while(true) { if (signal.aborted) break; await setTimeout() }` | ❌ Fails | ✅ Works | **Recommended pattern** |
 | `fetch().then().then()` | ❌ Fails | ❌ Fails | Promise chain is microtasks |
-| Script checks flag + setTimeout | ❌ Fails | ✅ Works | Recommended pattern |
-| Active network request | ❌ Fails | ❌ Fails | Network process independent |
+| `fetch(url, { signal })` | ❌ Fails | ✅ Works | Fetch honors signal |
+| Script checks flag + setTimeout | ❌ Fails | ✅ Works | Both patterns work |
+| Active network request (no signal) | ❌ Fails | ❌ Fails | Network process independent |
 | Queued setTimeout callbacks | ❌ Fails | ❌ Fails | Already scheduled |
 
 ## Bottom Line

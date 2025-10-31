@@ -1,16 +1,17 @@
 // DOM elements
 const durationInput = document.getElementById('duration');
 const executeBtn = document.getElementById('executeBtn');
-const executeWithTimeoutBtn = document.getElementById('executeWithTimeoutBtn');
 const statusDiv = document.getElementById('status');
 const executionsDiv = document.getElementById('executions');
 
 // Current execution tracking
 let currentExecutionId = null;
+let currentTabId = null;
 
 // Execute script button handler
 executeBtn.addEventListener('click', async () => {
   const duration = parseInt(durationInput.value);
+  const demoCase = document.querySelector('input[name="demoCase"]:checked').value;
 
   if (duration < 1000 || duration > 60000) {
     showStatus('Please enter a duration between 1000ms and 60000ms', 'error');
@@ -18,18 +19,21 @@ executeBtn.addEventListener('click', async () => {
   }
 
   executeBtn.disabled = true;
-  showStatus('Starting script execution...', 'info');
+  const caseName = demoCase === 'syncLoop' ? 'sync loop (setTimeout)' : 'async fetch chain';
+  showStatus(`Starting ${caseName}...`, 'info');
 
   try {
     const response = await chrome.runtime.sendMessage({
       action: 'executeScript',
+      demoCase: demoCase,
       duration: duration
     });
 
     if (response.success) {
-      currentExecutionId = response.executionId;
+      currentExecutionId = response.trackingId;
+      currentTabId = response.tabId;
       showStatus(
-        `Script started! Execution ID: ${response.executionId.substring(0, 8)}...`,
+        `Script started! (tab ${response.tabId})`,
         'success'
       );
 
@@ -49,46 +53,6 @@ executeBtn.addEventListener('click', async () => {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     executeBtn.disabled = false;
-  }
-});
-
-// Execute script with timeout button handler
-executeWithTimeoutBtn.addEventListener('click', async () => {
-  executeWithTimeoutBtn.disabled = true;
-  showStatus('Starting 10s script with 5s timeout...', 'info');
-
-  try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'executeScript',
-      duration: 10000,  // Script tries to run for 10 seconds
-      timeout: 5000     // But will self-terminate after 5 seconds
-    });
-
-    if (response.success) {
-      currentExecutionId = response.executionId;
-      showStatus(
-        `Script started with 5s timeout! ID: ${response.executionId.substring(0, 8)}...`,
-        'success'
-      );
-
-      // Refresh executions list
-      refreshExecutions();
-
-      // Start polling for updates
-      startPolling();
-    } else {
-      if (response.timeout) {
-        showStatus('Script timed out (expected!)', 'success');
-      } else if (response.terminated) {
-        showStatus('Script was terminated', 'error');
-      } else {
-        showStatus(`Error: ${response.error}`, 'error');
-      }
-    }
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    executeWithTimeoutBtn.disabled = false;
   }
 });
 
@@ -127,10 +91,12 @@ async function refreshExecutions() {
         ? exec.endTime - exec.startTime
         : Date.now() - exec.startTime;
 
+      const caseName = exec.demoCase === 'syncLoop' ? 'Sync Loop' : 'Async Chain';
+
       return `
         <div class="execution">
           <div class="execution-header">
-            <span class="execution-id">${exec.executionId.substring(0, 13)}...</span>
+            <span class="execution-id">Tab ${exec.tabId} - ${caseName}</span>
             <span class="execution-status ${exec.status}">${exec.status.toUpperCase()}</span>
           </div>
           <div class="execution-details">
@@ -138,8 +104,8 @@ async function refreshExecutions() {
           </div>
           ${exec.status === 'running' ? `
             <button class="danger cancel-btn" style="margin-top: 8px; width: 100%;"
-                    data-execution-id="${exec.executionId}">
-              Cancel Execution
+                    data-tab-id="${exec.tabId}">
+              Terminate (Tab ${exec.tabId})
             </button>
           ` : ''}
         </div>
@@ -149,8 +115,8 @@ async function refreshExecutions() {
     // Add event listeners to cancel buttons
     document.querySelectorAll('.cancel-btn').forEach(button => {
       button.addEventListener('click', () => {
-        const executionId = button.getAttribute('data-execution-id');
-        cancelExecution(executionId);
+        const tabId = parseInt(button.getAttribute('data-tab-id'));
+        cancelExecution(tabId);
       });
     });
   } catch (error) {
@@ -158,18 +124,18 @@ async function refreshExecutions() {
   }
 }
 
-// Cancel execution
-async function cancelExecution(executionId) {
+// Cancel execution - SIMPLIFIED: just pass tabId
+async function cancelExecution(tabId) {
   try {
-    showStatus('Terminating script...', 'info');
+    showStatus(`Calling terminate(${tabId})...`, 'info');
 
     const response = await chrome.runtime.sendMessage({
       action: 'cancelScript',
-      executionId: executionId
+      tabId: tabId
     });
 
     if (response.success) {
-      showStatus('Script terminated successfully!', 'success');
+      showStatus(`✅ Terminated tab ${tabId}!`, 'success');
       refreshExecutions();
     } else {
       showStatus(`Failed to terminate: ${response.error}`, 'error');

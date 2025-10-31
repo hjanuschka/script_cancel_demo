@@ -1,13 +1,13 @@
-// Map to track active script executions
+// Map to track active script executions (minimal tracking for UI only)
 const activeExecutions = new Map();
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'executeScript') {
-    handleExecuteScript(message.duration, message.timeout).then(sendResponse);
+    handleExecuteScript(message.demoCase, message.duration).then(sendResponse);
     return true; // Keep channel open for async response
   } else if (message.action === 'cancelScript') {
-    handleCancelScript(message.executionId).then(sendResponse);
+    handleCancelScript(message.tabId).then(sendResponse);
     return true;
   } else if (message.action === 'getActiveExecutions') {
     sendResponse(Array.from(activeExecutions.values()));
@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function handleExecuteScript(duration, timeout) {
+async function handleExecuteScript(demoCase, duration) {
   try {
     // Check if userScripts API is available
     if (!chrome.userScripts || !chrome.userScripts.execute) {
@@ -35,163 +35,195 @@ async function handleExecuteScript(duration, timeout) {
       return { success: false, error: 'No active tab found' };
     }
 
-    // Generate a temporary ID for cooperative cancellation
-    const tempId = 'exec_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    // Generate script code based on demo case
+    let scriptCode;
 
-    // Execute a long-running script with cooperative cancellation
-    const scriptCode = `
-      (async function() {
-        const startTime = Date.now();
-        const duration = ${duration};
-        const timeout = ${timeout || 'null'};  // Optional timeout
-        const tempId = '${tempId}';
+    if (demoCase === 'syncLoop') {
+      // Case 1: Sync loop with setTimeout yields (works with V8 termination)
+      scriptCode = `
+        (async function() {
+          const startTime = Date.now();
+          const duration = ${duration};
 
-        console.log('Script started with temp ID: ' + tempId + ', duration: ' + duration + 'ms, timeout: ' + (timeout || 'none'));
+          console.log('Sync loop demo started, duration: ' + duration + 'ms');
 
-        // Store cancellation flag globally
-        window.__scriptCancellations = window.__scriptCancellations || {};
-        window.__scriptCancellations[tempId] = false;
+          // Create visual indicator
+          const indicator = document.createElement('div');
+          indicator.id = 'script-cancel-demo-indicator';
+          indicator.style.cssText = \`
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: #4CAF50;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 999999;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+          \`;
+          indicator.textContent = '🔄 Sync loop starting...';
+          document.body.appendChild(indicator);
 
-        // Create a visual indicator (top left so it's visible with popup)
-        const indicator = document.createElement('div');
-        indicator.id = 'script-cancel-demo-indicator';
-        indicator.style.cssText = \`
-          position: fixed;
-          top: 10px;
-          left: 10px;
-          background: #4CAF50;
-          color: white;
-          padding: 15px;
-          border-radius: 5px;
-          z-index: 999999;
-          font-family: Arial, sans-serif;
-          font-size: 16px;
-          font-weight: bold;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-        \`;
-        indicator.textContent = 'Script starting...';
-        document.body.appendChild(indicator);
+          await new Promise(resolve => setTimeout(resolve, 50));
 
-        // Wait a moment to ensure indicator is visible before tight loop
-        await new Promise(resolve => setTimeout(resolve, 50));
+          let counter = 0;
 
-        // Simulate long-running work with UI updates
-        let counter = 0;
+          // Sync loop that yields via setTimeout
+          while (Date.now() - startTime < duration) {
+            const elapsed = Date.now() - startTime;
+            const remaining = duration - elapsed;
 
-        // Run until duration expires OR cancelled OR timeout
-        while (Date.now() - startTime < duration) {
-          const elapsed = Date.now() - startTime;
+            // Do some work (5ms worth)
+            const workUntil = Date.now() + 5;
+            while (Date.now() < workUntil) {
+              counter++;
+            }
 
-          // FIRST: Check timeout (self-termination without IPC)
-          if (timeout !== null && elapsed >= timeout) {
-            indicator.style.background = '#FF9800';
-            indicator.style.fontSize = '18px';
-            indicator.textContent = '⏱️ Script TIMEOUT (self-terminated)!';
-            setTimeout(() => indicator.remove(), 5000);
-            delete window.__scriptCancellations[tempId];
-            console.log('Script self-terminated due to timeout after ' + elapsed + 'ms');
-            return { success: false, timeout: true };
+            // Update UI
+            indicator.textContent = '🔄 Sync loop: ' + Math.round(remaining) + 'ms left (count: ' + counter + ')';
+
+            // Yield to event loop (macrotask) - allows V8 termination
+            await new Promise(resolve => setTimeout(resolve, 0));
           }
 
-          // SECOND: Check if cancelled (cooperative cancellation via IPC)
-          if (window.__scriptCancellations[tempId]) {
-            indicator.style.background = '#f44336';
-            indicator.style.fontSize = '18px';
-            indicator.textContent = '⛔ Script TERMINATED!';
-            setTimeout(() => indicator.remove(), 5000);
-            delete window.__scriptCancellations[tempId];
-            console.log('Script terminated via IPC after ' + elapsed + 'ms');
-            return { success: false, cancelled: true };
+          // Completed successfully
+          indicator.style.background = '#2196F3';
+          indicator.textContent = '✅ Sync loop completed! Count: ' + counter;
+
+          setTimeout(() => {
+            indicator.remove();
+          }, 3000);
+
+          return { success: true, iterations: counter };
+        })();
+      `;
+    } else if (demoCase === 'asyncChain') {
+      // Case 2: Async fetch chain (yields naturally, works with V8 termination)
+      scriptCode = `
+        (async function() {
+          const startTime = Date.now();
+          const duration = ${duration};
+
+          console.log('Async chain demo started, duration: ' + duration + 'ms');
+
+          // Create visual indicator
+          const indicator = document.createElement('div');
+          indicator.id = 'script-cancel-demo-indicator';
+          indicator.style.cssText = \`
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: #9C27B0;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 999999;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+          \`;
+          indicator.textContent = '⚡ Async chain starting...';
+          document.body.appendChild(indicator);
+
+          await new Promise(resolve => setTimeout(resolve, 50));
+
+          let chainCount = 0;
+
+          // Simulate async operations chain
+          while (Date.now() - startTime < duration) {
+            const elapsed = Date.now() - startTime;
+            const remaining = duration - elapsed;
+
+            indicator.textContent = '⚡ Async chain: ' + Math.round(remaining) + 'ms left (chains: ' + chainCount + ')';
+
+            // Simulate fetch chain with delays (yields naturally)
+            await Promise.resolve()
+              .then(() => new Promise(resolve => setTimeout(resolve, 100)))
+              .then(() => {
+                // Simulate processing
+                return { data: 'chunk_' + chainCount };
+              })
+              .then(result => {
+                // Simulate more processing
+                chainCount++;
+                return result;
+              })
+              .then(() => new Promise(resolve => setTimeout(resolve, 50)));
           }
 
-          // Do a SHORT burst of work (5ms worth)
-          const workUntil = Date.now() + 5;
-          while (Date.now() < workUntil && !window.__scriptCancellations[tempId]) {
-            counter++;
-          }
+          // Completed successfully
+          indicator.style.background = '#673AB7';
+          indicator.textContent = '✅ Async chain completed! Chains: ' + chainCount;
 
-          // Update UI
-          const now = Date.now();
-          const currentElapsed = now - startTime;
-          const remaining = duration - currentElapsed;
-          let statusText = '🟢 Running: ' + Math.round(remaining) + 'ms left';
-          if (timeout !== null) {
-            const timeoutRemaining = timeout - currentElapsed;
-            statusText += ' (timeout in ' + Math.round(timeoutRemaining) + 'ms)';
-          }
-          indicator.textContent = statusText;
+          setTimeout(() => {
+            indicator.remove();
+          }, 3000);
 
-          // CRITICAL: Use setTimeout (macrotask) instead of Promise.resolve (microtask)
-          // Microtasks run BEFORE the browser processes IPC messages
-          // Macrotasks return to the event loop, allowing IPC to be processed
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-
-        // Script completed successfully
-        indicator.style.background = '#2196F3';
-        indicator.textContent = 'Script completed successfully!';
-
-        setTimeout(() => {
-          indicator.remove();
-        }, 2000);
-
-        delete window.__scriptCancellations[tempId];
-        return {
-          success: true,
-          iterations: counter
-        };
-      })();
-    `;
-
-    // Execute the script - returns executionId immediately
-    const results = await chrome.userScripts.execute({
-      target: { tabId: tab.id },
-      js: [{ code: scriptCode }],  // Use js array with code property
-      world: 'MAIN'
-    });
-
-    // Get the execution ID from the result
-    const executionId = results[0]?.executionId;
-
-    if (!executionId) {
-      return {
-        success: false,
-        error: 'No execution ID returned by browser'
-      };
+          return { success: true, chains: chainCount };
+        })();
+      `;
+    } else {
+      return { success: false, error: 'Unknown demo case: ' + demoCase };
     }
 
-    console.log(`Script execution started with ID ${executionId}, tempId ${tempId}`);
+    // Generate a unique execution ID that we'll pass to execute()
+    // This gives us a "handle" to the execution before it even starts!
+    const executionId = crypto.randomUUID();
+    const trackingId = `${tab.id}_${Date.now()}`;
 
-    // Store execution info (including tempId for cooperative cancellation)
-    activeExecutions.set(executionId, {
-      executionId,
-      tempId,  // Store for cooperative cancellation
+    // Store minimal execution info for UI tracking BEFORE executing
+    // This ensures it shows up immediately in the UI, and we already have the executionId!
+    activeExecutions.set(trackingId, {
+      trackingId,
       tabId: tab.id,
+      executionId,  // Store it immediately!
+      demoCase,
       startTime: Date.now(),
       duration,
-      timeout,  // Store timeout for UI display
       status: 'running'
     });
 
-    // Monitor script completion in background
-    // Use timeout if specified, otherwise use duration
-    const maxRuntime = timeout || duration;
-    setTimeout(() => {
-      const execution = activeExecutions.get(executionId);
-      if (execution && execution.status === 'running') {
-        // If timeout was specified and we're here, script timed out
-        if (timeout) {
-          execution.status = 'timeout';
-        } else {
-          execution.status = 'completed';
+    console.log(`Script execution starting on tab ${tab.id}, tracking ID: ${trackingId}, executionId: ${executionId}`);
+
+    // Execute the script with our pre-generated executionId
+    // Now we can terminate it immediately without waiting for the callback!
+    chrome.userScripts.execute({
+      target: { tabId: tab.id },
+      js: [{ code: scriptCode }],
+      world: 'MAIN',
+      executionId: executionId  // Pass our handle!
+    }).then(results => {
+      console.log(`Script execution completed on tab ${tab.id}`, results);
+
+      const execution = activeExecutions.get(trackingId);
+      if (execution) {
+        // Verify the returned executionId matches what we sent
+        if (results && results.length > 0 && results[0].executionId) {
+          console.log(`Execution completed with ID: ${results[0].executionId} (matches: ${results[0].executionId === executionId})`);
         }
+
+        execution.status = 'completed';
         execution.endTime = Date.now();
       }
-    }, maxRuntime + 1000);
+    }).catch(error => {
+      console.error(`Script execution failed on tab ${tab.id}:`, error);
+      const execution = activeExecutions.get(trackingId);
+      if (execution) {
+        execution.status = 'failed';
+        execution.endTime = Date.now();
+        execution.error = error.message;
+      }
+    });
 
+    // Return immediately so UI updates right away
     return {
       success: true,
-      executionId
+      trackingId,
+      tabId: tab.id
     };
 
   } catch (error) {
@@ -204,59 +236,39 @@ async function handleExecuteScript(duration, timeout) {
   }
 }
 
-async function handleCancelScript(executionId) {
+async function handleCancelScript(tabId) {
   try {
-    const execution = activeExecutions.get(executionId);
-
-    if (!execution) {
-      return { success: false, error: 'Execution not found' };
+    // Find the running execution on this tab
+    let executionToTerminate = null;
+    for (const [id, execution] of activeExecutions.entries()) {
+      if (execution.tabId === tabId && execution.status === 'running') {
+        executionToTerminate = execution;
+        break;
+      }
     }
 
-    if (execution.status !== 'running') {
-      return { success: false, error: 'Execution is not running' };
+    if (!executionToTerminate) {
+      return { success: false, error: 'No running execution found on this tab' };
     }
 
-    console.log(`Terminating script execution ${executionId} (tempId: ${execution.tempId})`);
-
-    // COOPERATIVE CANCELLATION: Set the global flag that the script checks
-    // This works reliably even with async/await code
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: execution.tabId },
-        func: (tempId) => {
-          window.__scriptCancellations = window.__scriptCancellations || {};
-          window.__scriptCancellations[tempId] = true;
-          console.log('Cooperative cancellation flag set for:', tempId);
-        },
-        args: [execution.tempId],
-        world: 'MAIN'  // Execute in MAIN world where the script is running
-      });
-      console.log('Cooperative cancellation flag injected successfully');
-    } catch (flagError) {
-      console.error('Failed to inject cancellation flag:', flagError);
-      // Continue anyway - V8 termination might still work
+    if (!executionToTerminate.executionId) {
+      return { success: false, error: 'Execution ID not yet available (script may still be starting)' };
     }
 
-    // ALSO call V8 termination as a backup (helps with synchronous code paths)
-    // Note: This is unreliable with async/await, but cooperative flag above handles that
-    try {
-      await chrome.userScripts.terminate(executionId);
-      console.log('V8 termination called successfully');
-    } catch (v8Error) {
-      console.error('V8 termination failed:', v8Error);
-      // Don't fail the whole operation - cooperative cancellation is the primary mechanism
-    }
+    console.log(`Calling chrome.userScripts.terminate(${tabId}, "${executionToTerminate.executionId}")`);
 
-    // Mark as terminated
-    execution.status = 'terminated';
-    execution.endTime = Date.now();
+    const result = await chrome.userScripts.terminate(tabId, executionToTerminate.executionId);
 
-    console.log(`Script execution ${executionId} termination complete`);
+    console.log(`Termination call completed for execution ${executionToTerminate.executionId}, result:`, result);
 
-    return { success: true, terminated: true };
+    // Mark execution as terminated (for UI only)
+    executionToTerminate.status = 'terminated';
+    executionToTerminate.endTime = Date.now();
+
+    return { success: true, terminated: result, executionId: executionToTerminate.executionId };
 
   } catch (error) {
-    console.error('Cancellation failed:', error);
+    console.error('Termination failed:', error);
     return { success: false, error: error.message };
   }
 }
